@@ -57,8 +57,9 @@ async function getPiso(id) {
 (async () => {
   for (const u of (await db.collection('users').get()).docs) {
     const { tokens = [], tz = 'Europe/Madrid', pisoId, housetime } = u.data();
-    if (!tokens.length) continue;
+    if (!tokens.length) { console.log(`Usuario ${u.id}: sin dispositivos con avisos activados`); continue; }
     const { date, min } = nowIn(tz);
+    console.log(`Usuario ${u.id}: ${tokens.length} dispositivo(s), hoy ${date}, son las ${Math.floor(min / 60)}:${pad(min % 60)}`);
 
     // 1) Tareas de la agenda personal con campanita (incluye las que se repiten)
     const col = u.ref.collection('events');
@@ -67,11 +68,13 @@ async function getPiso(id) {
       (await q.get()).docs.forEach(d => found.set(d.id, d));
     for (const e of found.values()) {
       const ev = e.data();
-      if (!occurs(ev, date) || !ev.alert || !ev.time) continue;
+      if (!occurs(ev, date)) continue;
       const done = ev.repeat ? (ev.doneDates || []).includes(date) : ev.done;
       const already = ev.repeat ? (ev.notifiedDates || []).includes(date) : ev.notified;
       const t = toMin(ev.time);
-      if (done || already || t > min || min - t > 120) continue; // aún no es la hora, o pasaron más de 2 h
+      const why = !ev.alert ? 'sin campanita' : !ev.time ? 'sin hora' : done ? 'ya hecha' : already ? 'ya avisada' : t > min ? 'aún no es la hora' : min - t > 180 ? 'pasaron más de 3 h' : '';
+      console.log(`  Tarea "${ev.title}" (${ev.time}): ${why || 'AVISAR'}`);
+      if (why) continue;
       await push(u, tokens, `⏰ ${ev.time}`, `Es tu hora: ${ev.title}`);
       await e.ref.update(ev.repeat ? { notifiedDates: FV.arrayUnion(date) } : { notified: true });
     }

@@ -97,3 +97,7 @@ select{width:100%;padding:12px 14px;border:0;border-radius:12px;background:var(-
 .add.task button{grid-column:1/-1;padding:13px}
 .row.gh .t{font-weight:600}
 select.pick{width:auto;max-width:132px;padding:6px 10px;font-size:14px;border-radius:10px;background:var(--bg);box-shadow:none}
+.add.ev{grid-template-columns:112px 1fr}
+.bell{grid-column:1/-1;display:flex;align-items:center;justify-content:flex-start;padding:2px 4px}
+.bell span{display:flex;align-items:center;gap:8px}
+.bell em{font-style:normal;font-size:15px}

@@ -110,7 +110,7 @@ function agendaView() {
       <button class="bellb ${e.alert ? 'on' : ''}" data-act="evBell" data-id="${e.id}" aria-pressed="${!!e.alert}" aria-label="Avisarme a su hora">${BELL}</button>
       <button class="chk ${isDone(e, S.date) ? 'on' : ''}" data-act="evDone" data-id="${e.id}" aria-label="Marcar hecha">${isDone(e, S.date) ? '✓' : ''}</button>
       <button class="x" data-act="evDel" data-id="${e.id}" aria-label="Borrar">×</button></div>`).join('')}</div>` : '<div class="empty">Nada apuntado este día.</div>') +
-    `<form class="add ev" id="addEv"><input name="time" type="time" required value="09:00"><input name="title" placeholder="Nueva tarea" required><label class="bell" title="Avisarme a su hora" aria-label="Avisarme a su hora"><input type="checkbox" name="alert"><span>${BELL}</span></label><select name="repeat" aria-label="Repetir"><option value="">No se repite</option><option value="daily">Se repite cada día</option><option value="weekly">Se repite cada semana</option></select><button>Añadir</button></form>`;
+    `<form class="add ev" id="addEv"><input name="time" type="time" required value="09:00"><input name="title" placeholder="Nueva tarea" required><label class="bell"><input type="checkbox" name="alert"><span>${BELL}<em>Avisarme a su hora</em></span></label><select name="repeat" aria-label="Repetir"><option value="">No se repite</option><option value="daily">Se repite cada día</option><option value="weekly">Se repite cada semana</option></select><button>Añadir</button></form>`;
 }
 
 function taskRow(t) {
