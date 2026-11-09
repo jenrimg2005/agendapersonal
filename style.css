@@ -96,3 +96,4 @@ select{width:100%;padding:12px 14px;border:0;border-radius:12px;background:var(-
 .add.task{grid-template-columns:1fr 1fr}
 .add.task button{grid-column:1/-1;padding:13px}
 .row.gh .t{font-weight:600}
+select.pick{width:auto;max-width:132px;padding:6px 10px;font-size:14px;border-radius:10px;background:var(--bg);box-shadow:none}

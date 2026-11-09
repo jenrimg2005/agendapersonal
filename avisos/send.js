@@ -10,8 +10,9 @@ const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); r
 const monday = d => addDays(d, -((d.getDay() + 6) % 7));
 const weekNum = d => Math.round((monday(d) - new Date(2024, 0, 1)) / 6048e5);
 const mod = (a, n) => ((a % n) + n) % n;
-// Reparto semanal: cada semana los grupos de tareas cambian de persona al azar, pero de forma justa:
-// en cada ciclo de n semanas todos hacen todos los grupos una vez. Mismo cálculo en la app y en el servidor.
+// Reparto semanal: los grupos de tareas rotan al azar entre las personas, de forma justa
+// (en cada ciclo de n semanas todos pasan por todos los grupos). El admin puede cambiar a mano
+// a quién le toca un grupo en una semana concreta (overrides). Mismo cálculo en la app y en el servidor.
 function hash(str) { let h = 1779033703 ^ str.length; for (let i = 0; i < str.length; i++) { h = Math.imul(h ^ str.charCodeAt(i), 3432918353); h = h << 13 | h >>> 19; } return h >>> 0; }
 function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 function shiftFor(pid, w, n) {
@@ -19,7 +20,11 @@ function shiftFor(pid, w, n) {
   for (let i = n - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
   return a[mod(w, n)];
 }
-const assignee = (p, g, w) => p.members[mod(g + shiftFor(p.id, w, p.members.length), p.members.length)];
+const gIndex = (p, gid) => { const i = (p.groups || []).findIndex(g => g.id === gid); return i < 0 ? (p.groups || []).length : i; };
+function assignee(p, gid, w) {
+  const o = p.overrides?.['w' + w]?.[gid], n = p.members.length;
+  return o && p.members.includes(o) ? o : p.members[mod(gIndex(p, gid) + shiftFor(p.id, w, n), n)];
+}
 
 const toMin = t => { const [h, m] = (t || '08:00').split(':').map(Number); return h * 60 + m; };
 const occurs = (e, d) => e.date === d || (e.repeat && d >= e.date && (e.repeat === 'daily' || parse(d).getDay() === parse(e.date).getDay()));
@@ -76,7 +81,7 @@ async function getPiso(id) {
     if (p && min >= toMin(housetime)) {
       const d = parse(date), w = weekNum(d), wk = iso(monday(d)), wd = (d.getDay() + 6) % 7;
       for (const [i, t] of (p.tasks || []).entries()) {
-        if (t.day !== wd || assignee(p, t.group != null ? t.group : i, w) !== u.id) continue;
+        if (t.day !== wd || assignee(p, t.gid || 'none', w) !== u.id) continue;
         const key = `${wk}_${t.id}`;
         const [dn, sn] = await Promise.all([p.ref.collection('done').doc(key).get(), p.ref.collection('sent').doc(key).get()]);
         if (dn.exists || sn.exists) continue;
