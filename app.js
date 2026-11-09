@@ -31,10 +31,21 @@ const S = { tab: 'hoy', reg: false, err: '', user: null, pid: null, piso: null, 
 let subs = [], pisoSubs = [];
 
 // Tareas del piso de la semana que contiene `dateStr` (rotación: tarea i → miembro (i + semana) % n)
+// Reparto semanal: cada semana los grupos de tareas cambian de persona al azar, pero de forma justa:
+// en cada ciclo de n semanas todos hacen todos los grupos una vez. Mismo cálculo en la app y en el servidor.
+function hash(str) { let h = 1779033703 ^ str.length; for (let i = 0; i < str.length; i++) { h = Math.imul(h ^ str.charCodeAt(i), 3432918353); h = h << 13 | h >>> 19; } return h >>> 0; }
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function shiftFor(pid, w, n) {
+  const r = rng(hash(pid + ':' + Math.floor(w / n))), a = [...Array(n).keys()];
+  for (let i = n - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a[mod(w, n)];
+}
+const assignee = (p, g, w) => p.members[mod(g + shiftFor(p.id, w, p.members.length), p.members.length)];
+
 function pisoTasks(dateStr) {
   const p = S.piso; if (!p || !p.members.length) return [];
   const d = parse(dateStr), wk = iso(monday(d)), w = weekNum(d);
-  return p.tasks.map((t, i) => ({ ...t, wk, uid: p.members[mod(i + w, p.members.length)], done: !!S.done[`${wk}_${t.id}`] }));
+  return (p.tasks || []).map((t, i) => { const gi = t.group != null ? t.group : i; return { ...t, gi, wk, uid: assignee(p, gi, w), done: !!S.done[`${wk}_${t.id}`] }; });
 }
 const nameOf = uid => esc(S.piso?.names?.[uid] || 'Alguien');
 
@@ -110,12 +121,21 @@ function colectivoView() {
     <h2>Unirme con un código</h2><form class="add one" id="joinPiso"><input name="code" placeholder="Código de 6 letras" required maxlength="6" autocapitalize="characters"><button>Unirme</button></form>
     <p class="err">${esc(S.err)}</p>`;
   const ws = parse(S.week), tasks = pisoTasks(S.week), n = tasks.filter(t => t.done).length;
+  const owner = p.owner || p.members[0], isOwner = owner === S.user.uid;
+  const groups = [...new Set(tasks.map(t => t.gi))].sort((a, b) => a - b).map(g => {
+    const ts = tasks.filter(t => t.gi === g).sort((a, b) => (a.day ?? 9) - (b.day ?? 9)), uid = ts[0].uid, mine = uid === S.user.uid;
+    return `<div class="list"><div class="row gh ${mine ? 'mine' : ''}">${avatar(uid, p.names?.[uid])}<span class="t">${mine ? 'Te toca a ti' : nameOf(uid)}<small>Grupo ${g + 1}</small></span></div>` +
+      ts.map(t => `<div class="row ${t.done ? 'done' : ''}"><span class="t">${esc(t.name)}<small>${t.day != null ? DAYS[t.day] : 'Cualquier día'}</small></span><button class="chk ${t.done ? 'on' : ''}" data-act="taskDone" data-id="${t.id}" data-wk="${t.wk}" aria-label="Marcar hecha">${t.done ? '✓' : ''}</button>${isOwner ? `<button class="x" data-act="taskDel" data-id="${t.id}" aria-label="Quitar tarea">×</button>` : ''}</div>`).join('') + '</div>';
+  }).join('');
+  const gopts = Array.from({ length: Math.max(p.members.length, 2, ...tasks.map(t => t.gi + 1)) }, (_, i) => `<option value="${i}">Grupo ${i + 1}</option>`).join('');
   return topbar('Colectivo') + `<p>${esc(p.name)}</p>
   <div class="nav"><strong>${fmt(ws, { day: 'numeric', month: 'short' })} – ${fmt(addDays(ws, 6), { day: 'numeric', month: 'short' })}</strong><span><button data-act="wk" data-n="-7" aria-label="Semana anterior">‹</button><button data-act="wk" data-n="7" aria-label="Semana siguiente">›</button></span></div>
   <div class="card"><div><b>${n}</b> de ${tasks.length} tareas hechas</div><div class="bar"><i style="width:${tasks.length ? Math.round(n / tasks.length * 100) : 0}%"></i></div></div>` +
-  (tasks.length ? `<div class="list">${tasks.map(t => taskRow(t).replace(/<\/div>$/, `<button class="x" data-act="taskDel" data-id="${t.id}" aria-label="Quitar tarea">×</button></div>`)).join('')}</div>` : '<div class="empty">Aún no hay tareas. Añade la primera abajo.</div>') +
-  `<form class="add task" id="addTask"><input name="name" placeholder="Nueva tarea (ej. Fregar baño)" required><select name="day" aria-label="Día en que toca"><option value="">Cualquier día</option>${DAYS.map((n, i) => `<option value="${i}">${n}</option>`).join('')}</select><button>Añadir</button></form>
-  <h2>Miembros</h2><div class="card members">${p.members.map(u => `<div class="mem">${avatar(u, p.names?.[u])}<small>${nameOf(u)}</small></div>`).join('')}</div>
+  (groups || `<div class="empty">${isOwner ? 'Aún no hay tareas. Añade la primera abajo.' : 'El administrador aún no ha añadido tareas.'}</div>`) +
+  (isOwner ? `<h2>Añadir tarea</h2><p>Las tareas del mismo grupo las hace la misma persona esa semana. Cada semana los grupos cambian de persona al azar.</p>
+  <form class="add task" id="addTask"><input name="name" placeholder="Nueva tarea (ej. Fregar baño)" required><select name="day" aria-label="Día en que toca"><option value="">Cualquier día</option>${DAYS.map((d, i) => `<option value="${i}">${d}</option>`).join('')}</select><select name="group" aria-label="Grupo">${gopts}</select><button>Añadir</button></form>`
+    : `<p>Solo ${nameOf(owner)} puede editar las tareas.</p>`) +
+  `<h2>Miembros</h2><div class="card members">${p.members.map(u => `<div class="mem">${avatar(u, p.names?.[u])}<small>${nameOf(u)}${u === owner ? ' · admin' : ''}</small></div>`).join('')}</div>
   <h2>Código para invitar</h2><div class="card"><span class="code">${esc(p.code)}</span></div>`;
 }
 
@@ -170,7 +190,7 @@ app.addEventListener('click', async e => {
     if (act === 'toggleReg') { S.reg = !S.reg; S.err = ''; }
     else if (act === 'tab') S.tab = t;
     else if (act === 'pick') S.date = d;
-    else if (act === 'leave') { if (!confirm('¿Salir del colectivo?')) return; await updateDoc(doc(db, 'pisos', S.pid), { members: arrayRemove(me()), [`names.${me()}`]: deleteField() }); await updateDoc(doc(db, 'users', me()), { pisoId: deleteField() }); }
+    else if (act === 'leave') { if (!confirm('¿Salir del colectivo?')) return; await updateDoc(doc(db, 'pisos', S.pid), { members: arrayRemove(me()), [`names.${me()}`]: deleteField(), ...((S.piso.owner || S.piso.members[0]) === me() && S.piso.members.length > 1 ? { owner: S.piso.members.find(x => x !== me()) } : {}) }); await updateDoc(doc(db, 'users', me()), { pisoId: deleteField() }); }
     else if (act === 'day') S.date = iso(addDays(parse(S.date), +n));
     else if (act === 'wk') S.week = iso(addDays(parse(S.week), +n));
     else if (act === 'push') return enablePush();
@@ -194,7 +214,7 @@ app.addEventListener('submit', async e => {
     } else if (id === 'addEv') {
       await addDoc(collection(db, 'users', me(), 'events'), { date: S.date, time: f.time, title: f.title.trim(), done: false, alert: f.alert === 'on', notified: false, repeat: f.repeat || null }); e.target.title.value = '';
     } else if (id === 'mkPiso') {
-      const ref = await addDoc(collection(db, 'pisos'), { name: f.name.trim(), code: Math.random().toString(36).slice(2, 8).toUpperCase(), members: [me()], names: { [me()]: myName() }, tasks: [] });
+      const ref = await addDoc(collection(db, 'pisos'), { name: f.name.trim(), code: Math.random().toString(36).slice(2, 8).toUpperCase(), owner: me(), members: [me()], names: { [me()]: myName() }, tasks: [] });
       await setDoc(doc(db, 'users', me()), { pisoId: ref.id }, { merge: true });
     } else if (id === 'joinPiso') {
       const q = await getDocs(query(collection(db, 'pisos'), where('code', '==', f.code.trim().toUpperCase())));
@@ -207,7 +227,7 @@ app.addEventListener('submit', async e => {
       const nm = f.name.trim(); await updateProfile(auth.currentUser, { displayName: nm }); await setDoc(doc(db, 'users', me()), { name: nm }, { merge: true });
       if (S.pid) await updateDoc(doc(db, 'pisos', S.pid), { [`names.${me()}`]: nm });
     } else if (id === 'addTask') {
-      await updateDoc(doc(db, 'pisos', S.pid), { tasks: arrayUnion({ id: crypto.randomUUID().slice(0, 8), name: f.name.trim(), day: f.day === '' ? null : +f.day }) }); e.target.name.value = '';
+      await updateDoc(doc(db, 'pisos', S.pid), { tasks: arrayUnion({ id: crypto.randomUUID().slice(0, 8), name: f.name.trim(), day: f.day === '' ? null : +f.day, group: +f.group }) }); e.target.name.value = '';
     }
     S.err = '';
   } catch (x) { S.err = errMsg(x); }
