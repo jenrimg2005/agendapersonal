@@ -18,6 +18,10 @@ const parse = s => { const [y, m, d] = s.split('-').map(Number); return new Date
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 const monday = d => addDays(d, -((d.getDay() + 6) % 7));
 const weekNum = d => Math.round((monday(d) - new Date(2024, 0, 1)) / 6048e5);
+const DAYS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+const wday = d => (d.getDay() + 6) % 7;
+const occurs = (e, d) => e.date === d || (e.repeat && d >= e.date && (e.repeat === 'daily' || parse(d).getDay() === parse(e.date).getDay()));
+const isDone = (e, d) => e.repeat ? (e.doneDates || []).includes(d) : !!e.done;
 const BELL = '<svg class="bi" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17v-6a6 6 0 0 1 12 0v6l1.5 1.5h-15z"/><path d="M10 21h4"/></svg>';
 const mod = (a, n) => ((a % n) + n) % n;
 const fmt = (d, o) => d.toLocaleDateString('es-ES', o);
@@ -75,27 +79,27 @@ const GROUP = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.
 function weekStrip() {
   const m = monday(parse(S.date)), today = iso(new Date());
   return `<div class="strip">${[0, 1, 2, 3, 4, 5, 6].map(i => { const x = addDays(m, i), k = iso(x);
-    return `<button class="day ${k === S.date ? 'sel' : ''} ${k === today ? 'today' : ''}" data-act="pick" data-d="${k}" aria-label="${fmt(x, { weekday: 'long', day: 'numeric', month: 'long' })}"><small>${fmt(x, { weekday: 'narrow' }).toUpperCase()}</small><b>${x.getDate()}</b><i class="${S.events.some(e => e.date === k) ? 'dot' : ''}"></i></button>`; }).join('')}</div>`;
+    return `<button class="day ${k === S.date ? 'sel' : ''} ${k === today ? 'today' : ''}" data-act="pick" data-d="${k}" aria-label="${fmt(x, { weekday: 'long', day: 'numeric', month: 'long' })}"><small>${fmt(x, { weekday: 'narrow' }).toUpperCase()}</small><b>${x.getDate()}</b><i class="${S.events.some(e => occurs(e, k)) ? 'dot' : ''}"></i></button>`; }).join('')}</div>`;
 }
 
 function agendaView() {
-  const d = parse(S.date), evs = S.events.filter(e => e.date === S.date).sort((a, b) => a.time.localeCompare(b.time));
-  const mine = pisoTasks(S.date).filter(t => t.uid === S.user.uid), done = evs.filter(e => e.done).length;
+  const d = parse(S.date), evs = S.events.filter(e => occurs(e, S.date)).sort((a, b) => a.time.localeCompare(b.time));
+  const mine = pisoTasks(S.date).filter(t => t.uid === S.user.uid && (t.day == null || t.day === wday(d))), done = evs.filter(e => isDone(e, S.date)).length;
   return topbar('Agenda') +
     `<div class="nav"><strong class="sub">${fmt(d, { month: 'long', year: 'numeric' })}</strong><span><button data-act="day" data-n="-7" aria-label="Semana anterior">‹</button><button data-act="day" data-n="7" aria-label="Semana siguiente">›</button></span></div>` + weekStrip() +
     `<div class="sum"><div><b>${evs.length - done}</b><span>pendientes</span></div><div><b>${done}</b><span>completadas</span></div></div>` +
     (mine.length ? `<h2>Te toca en el colectivo</h2><div class="list">${mine.map(t => taskRow(t)).join('')}</div>` : '') +
     `<h2 class="sub">${fmt(d, { weekday: 'long', day: 'numeric', month: 'long' })}</h2>` +
-    (evs.length ? `<div class="list">${evs.map(e => `<div class="row ${e.done ? 'done' : ''}"><span class="time">${esc(e.time)}</span><span class="t">${esc(e.title)}</span>
+    (evs.length ? `<div class="list">${evs.map(e => `<div class="row ${isDone(e, S.date) ? 'done' : ''}"><span class="time">${esc(e.time)}</span><span class="t">${esc(e.title)}${e.repeat ? `<small>Se repite ${e.repeat === 'daily' ? 'cada día' : 'cada semana'}</small>` : ''}</span>
       <button class="bellb ${e.alert ? 'on' : ''}" data-act="evBell" data-id="${e.id}" aria-pressed="${!!e.alert}" aria-label="Avisarme a su hora">${BELL}</button>
-      <button class="chk ${e.done ? 'on' : ''}" data-act="evDone" data-id="${e.id}" aria-label="Marcar hecha">${e.done ? '✓' : ''}</button>
+      <button class="chk ${isDone(e, S.date) ? 'on' : ''}" data-act="evDone" data-id="${e.id}" aria-label="Marcar hecha">${isDone(e, S.date) ? '✓' : ''}</button>
       <button class="x" data-act="evDel" data-id="${e.id}" aria-label="Borrar">×</button></div>`).join('')}</div>` : '<div class="empty">Nada apuntado este día.</div>') +
-    `<form class="add ev" id="addEv"><input name="time" type="time" required value="09:00"><input name="title" placeholder="Nueva tarea" required><label class="bell" title="Avisarme a su hora" aria-label="Avisarme a su hora"><input type="checkbox" name="alert"><span>${BELL}</span></label><button>Añadir</button></form>`;
+    `<form class="add ev" id="addEv"><input name="time" type="time" required value="09:00"><input name="title" placeholder="Nueva tarea" required><label class="bell" title="Avisarme a su hora" aria-label="Avisarme a su hora"><input type="checkbox" name="alert"><span>${BELL}</span></label><select name="repeat" aria-label="Repetir"><option value="">No se repite</option><option value="daily">Se repite cada día</option><option value="weekly">Se repite cada semana</option></select><button>Añadir</button></form>`;
 }
 
 function taskRow(t) {
   const mine = t.uid === S.user.uid;
-  return `<div class="row ${mine ? 'mine' : ''} ${t.done ? 'done' : ''}">${avatar(t.uid, S.piso?.names?.[t.uid])}<span class="t">${esc(t.name)}<small>${mine ? 'Te toca a ti' : nameOf(t.uid)}</small></span>
+  return `<div class="row ${mine ? 'mine' : ''} ${t.done ? 'done' : ''}">${avatar(t.uid, S.piso?.names?.[t.uid])}<span class="t">${esc(t.name)}<small>${t.day != null ? DAYS[t.day] + ' · ' : ''}${mine ? 'Te toca a ti' : nameOf(t.uid)}</small></span>
   <button class="chk ${t.done ? 'on' : ''}" data-act="taskDone" data-id="${t.id}" data-wk="${t.wk}" aria-label="Marcar hecha">${t.done ? '✓' : ''}</button></div>`;
 }
 
@@ -110,7 +114,7 @@ function colectivoView() {
   <div class="nav"><strong>${fmt(ws, { day: 'numeric', month: 'short' })} – ${fmt(addDays(ws, 6), { day: 'numeric', month: 'short' })}</strong><span><button data-act="wk" data-n="-7" aria-label="Semana anterior">‹</button><button data-act="wk" data-n="7" aria-label="Semana siguiente">›</button></span></div>
   <div class="card"><div><b>${n}</b> de ${tasks.length} tareas hechas</div><div class="bar"><i style="width:${tasks.length ? Math.round(n / tasks.length * 100) : 0}%"></i></div></div>` +
   (tasks.length ? `<div class="list">${tasks.map(t => taskRow(t).replace(/<\/div>$/, `<button class="x" data-act="taskDel" data-id="${t.id}" aria-label="Quitar tarea">×</button></div>`)).join('')}</div>` : '<div class="empty">Aún no hay tareas. Añade la primera abajo.</div>') +
-  `<form class="add one" id="addTask"><input name="name" placeholder="Nueva tarea (ej. Fregar baño)" required><button>Añadir</button></form>
+  `<form class="add task" id="addTask"><input name="name" placeholder="Nueva tarea (ej. Fregar baño)" required><select name="day" aria-label="Día en que toca"><option value="">Cualquier día</option>${DAYS.map((n, i) => `<option value="${i}">${n}</option>`).join('')}</select><button>Añadir</button></form>
   <h2>Miembros</h2><div class="card members">${p.members.map(u => `<div class="mem">${avatar(u, p.names?.[u])}<small>${nameOf(u)}</small></div>`).join('')}</div>
   <h2>Código para invitar</h2><div class="card"><span class="code">${esc(p.code)}</span></div>`;
 }
@@ -120,7 +124,7 @@ function perfilView() {
   return `<header class="top"><h1>Perfil</h1></header>
   <div class="prof">${avatar(u.uid, name, 'big')}<b>${esc(name)}</b><span>${esc(u.email)}</span></div>
   <h2>Cuenta</h2><div class="list"><form class="row" id="rename"><span class="v">Nombre</span><input name="name" value="${esc(name)}" required maxlength="30"><button class="link">Guardar</button></form></div>
-  <h2>Avisos</h2><div class="list"><div class="row"><span class="t">Notificaciones</span>${pushOn() ? '<span class="v">Activadas ✓</span>' : '<button class="link" data-act="push">Activar</button>'}</div></div>
+  <h2>Avisos</h2><div class="list"><div class="row"><span class="t">Notificaciones</span>${pushOn() ? '<span class="v">Activadas ✓</span>' : '<button class="link" data-act="push">Activar</button>'}</div><form class="row" id="housetime"><span class="t">Aviso del colectivo</span><input type="time" name="housetime" value="${esc(S.housetime || '08:00')}" required><button class="link">Guardar</button></form></div>
   ${S.pushMsg && S.pushMsg !== 'on' ? `<p class="err">${esc(S.pushMsg)}</p>` : ''}
   ${p ? `<h2>Colectivo</h2><div class="list"><div class="row"><span class="t">${esc(p.name)}<small>Código ${esc(p.code)}</small></span></div><button class="row danger" data-act="leave">Salir del colectivo</button></div>` : ''}
   <div class="list" style="margin-top:22px"><button class="row danger" data-act="out">Cerrar sesión</button></div>`;
@@ -144,7 +148,7 @@ function watchPiso(pid) {
   pisoSubs.push(onSnapshot(collection(db, 'pisos', pid, 'done'), s => { S.done = {}; s.docs.forEach(d => S.done[d.id] = 1); render(); }));
 }
 function watchUser(u) {
-  subs.push(onSnapshot(doc(db, 'users', u.uid), s => { const pid = s.data()?.pisoId || null; if (pid !== S.pid) { S.pid = pid; watchPiso(pid); } }));
+  subs.push(onSnapshot(doc(db, 'users', u.uid), s => { S.housetime = s.data()?.housetime; const pid = s.data()?.pisoId || null; if (pid !== S.pid) { S.pid = pid; watchPiso(pid); } }));
   subs.push(onSnapshot(collection(db, 'users', u.uid, 'events'), s => { S.events = s.docs.map(d => ({ id: d.id, ...d.data() })); render(); }));
 }
 onAuthStateChanged(auth, u => {
@@ -171,8 +175,8 @@ app.addEventListener('click', async e => {
     else if (act === 'wk') S.week = iso(addDays(parse(S.week), +n));
     else if (act === 'push') return enablePush();
     else if (act === 'out') return signOut(auth);
-    else if (act === 'evDone') { const ev = S.events.find(x => x.id === id); return updateDoc(doc(db, 'users', me(), 'events', id), { done: !ev.done }); }
-    else if (act === 'evBell') { const ev = S.events.find(x => x.id === id); return updateDoc(doc(db, 'users', me(), 'events', id), { alert: !ev.alert, notified: false }); }
+    else if (act === 'evDone') { const ev = S.events.find(x => x.id === id); const r = doc(db, 'users', me(), 'events', id); return ev.repeat ? updateDoc(r, { doneDates: isDone(ev, S.date) ? arrayRemove(S.date) : arrayUnion(S.date) }) : updateDoc(r, { done: !ev.done }); }
+    else if (act === 'evBell') { const ev = S.events.find(x => x.id === id); return updateDoc(doc(db, 'users', me(), 'events', id), { alert: !ev.alert, notified: false, notifiedDates: [] }); }
     else if (act === 'evDel') return deleteDoc(doc(db, 'users', me(), 'events', id));
     else if (act === 'taskDone') { const ref = doc(db, 'pisos', S.pid, 'done', `${wk}_${id}`); return S.done[`${wk}_${id}`] ? deleteDoc(ref) : setDoc(ref, { by: me() }); }
     else if (act === 'taskDel') return updateDoc(doc(db, 'pisos', S.pid), { tasks: arrayRemove(S.piso.tasks.find(x => x.id === id)) });
@@ -188,7 +192,7 @@ app.addEventListener('submit', async e => {
       if (S.reg) { const c = await createUserWithEmailAndPassword(auth, f.email, f.pass); await updateProfile(c.user, { displayName: f.name.trim() }); await setDoc(doc(db, 'users', c.user.uid), { name: f.name.trim() }); }
       else await signInWithEmailAndPassword(auth, f.email, f.pass);
     } else if (id === 'addEv') {
-      await addDoc(collection(db, 'users', me(), 'events'), { date: S.date, time: f.time, title: f.title.trim(), done: false, alert: f.alert === 'on', notified: false }); e.target.title.value = '';
+      await addDoc(collection(db, 'users', me(), 'events'), { date: S.date, time: f.time, title: f.title.trim(), done: false, alert: f.alert === 'on', notified: false, repeat: f.repeat || null }); e.target.title.value = '';
     } else if (id === 'mkPiso') {
       const ref = await addDoc(collection(db, 'pisos'), { name: f.name.trim(), code: Math.random().toString(36).slice(2, 8).toUpperCase(), members: [me()], names: { [me()]: myName() }, tasks: [] });
       await setDoc(doc(db, 'users', me()), { pisoId: ref.id }, { merge: true });
@@ -197,11 +201,13 @@ app.addEventListener('submit', async e => {
       if (q.empty) { S.err = 'No existe ningún piso con ese código.'; return render(); }
       await updateDoc(q.docs[0].ref, { members: arrayUnion(me()), [`names.${me()}`]: myName() });
       await setDoc(doc(db, 'users', me()), { pisoId: q.docs[0].id }, { merge: true });
+    } else if (id === 'housetime') {
+      await setDoc(doc(db, 'users', me()), { housetime: f.housetime }, { merge: true });
     } else if (id === 'rename') {
       const nm = f.name.trim(); await updateProfile(auth.currentUser, { displayName: nm }); await setDoc(doc(db, 'users', me()), { name: nm }, { merge: true });
       if (S.pid) await updateDoc(doc(db, 'pisos', S.pid), { [`names.${me()}`]: nm });
     } else if (id === 'addTask') {
-      await updateDoc(doc(db, 'pisos', S.pid), { tasks: arrayUnion({ id: crypto.randomUUID().slice(0, 8), name: f.name.trim() }) }); e.target.name.value = '';
+      await updateDoc(doc(db, 'pisos', S.pid), { tasks: arrayUnion({ id: crypto.randomUUID().slice(0, 8), name: f.name.trim(), day: f.day === '' ? null : +f.day }) }); e.target.name.value = '';
     }
     S.err = '';
   } catch (x) { S.err = errMsg(x); }
