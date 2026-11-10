@@ -37,15 +37,19 @@ function nowIn(tz) {
 
 let sent = 0;
 async function push(u, tokens, title, body) {
+  let ok = 0;
   for (const token of tokens) {
+    const id = '…' + token.slice(-6);
     try {
       await admin.messaging().send({ token, data: { title, body }, webpush: { headers: { Urgency: 'high', TTL: '3600' } } });
-      sent++;
+      sent++; ok++;
+      console.log(`    enviado al dispositivo ${id}`);
     } catch (err) {
+      console.error(`    ERROR con el dispositivo ${id}: ${err.code || ''} ${err.message || err}`);
       if (err.code === 'messaging/registration-token-not-registered') await u.ref.update({ tokens: FV.arrayRemove(token) });
-      else console.error(err.code || err);
     }
   }
+  return ok; // cuántos envíos salieron bien
 }
 
 const pisos = new Map();
@@ -75,8 +79,8 @@ async function getPiso(id) {
       const why = !ev.alert ? 'sin campanita' : !ev.time ? 'sin hora' : done ? 'ya hecha' : already ? 'ya avisada' : t > min ? 'aún no es la hora' : min - t > 180 ? 'pasaron más de 3 h' : '';
       console.log(`  Tarea "${ev.title}" (${ev.time}): ${why || 'AVISAR'}`);
       if (why) continue;
-      await push(u, tokens, `⏰ ${ev.time}`, `Es tu hora: ${ev.title}`);
-      await e.ref.update(ev.repeat ? { notifiedDates: FV.arrayUnion(date) } : { notified: true });
+      if (await push(u, tokens, `⏰ ${ev.time}`, `Es tu hora: ${ev.title}`)) // solo se marca como avisada si el envío salió bien
+        await e.ref.update(ev.repeat ? { notifiedDates: FV.arrayUnion(date) } : { notified: true });
     }
 
     // 2) Tareas del colectivo: "hoy te toca" a la hora elegida (por defecto 08:00)
@@ -88,8 +92,7 @@ async function getPiso(id) {
         const key = `${wk}_${t.id}`;
         const [dn, sn] = await Promise.all([p.ref.collection('done').doc(key).get(), p.ref.collection('sent').doc(key).get()]);
         if (dn.exists || sn.exists) continue;
-        await push(u, tokens, '🏠 Hoy te toca', t.name);
-        await p.ref.collection('sent').doc(key).set({ at: Date.now() });
+        if (await push(u, tokens, '🏠 Hoy te toca', t.name)) await p.ref.collection('sent').doc(key).set({ at: Date.now() });
       }
     }
   }
