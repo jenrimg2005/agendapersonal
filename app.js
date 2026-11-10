@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import { initializeAuth, indexedDBLocalPersistence, browserLocalPersistence, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, updateProfile } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
-import { getFirestore, doc, setDoc, addDoc, updateDoc, deleteDoc, collection, query, where, getDocs, onSnapshot, arrayUnion, arrayRemove, deleteField } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { getFirestore, doc, setDoc, addDoc, updateDoc, deleteDoc, collection, query, where, getDocs, getDoc, onSnapshot, arrayUnion, arrayRemove, deleteField } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { getMessaging, getToken } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging.js";
 import { firebaseConfig } from "./firebase-config.js";
 import { vapidKey } from "./notif-config.js";
@@ -26,7 +26,7 @@ const BELL = '<svg class="bi" viewBox="0 0 24 24" aria-hidden="true"><path d="M6
 const mod = (a, n) => ((a % n) + n) % n;
 const fmt = (d, o) => d.toLocaleDateString('es-ES', o);
 
-const S = { tab: 'hoy', reg: false, err: '', user: null, pid: null, piso: null, done: {}, events: [],
+const S = { tab: 'hoy', reg: false, err: '', user: null, pid: null, piso: null, done: {}, events: [], friends: [], plans: [],
   date: iso(new Date()), week: iso(monday(new Date())) };
 let subs = [], pisoSubs = [];
 
@@ -95,22 +95,30 @@ const GROUP = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.
 function weekStrip() {
   const m = monday(parse(S.date)), today = iso(new Date());
   return `<div class="strip">${[0, 1, 2, 3, 4, 5, 6].map(i => { const x = addDays(m, i), k = iso(x);
-    return `<button class="day ${k === S.date ? 'sel' : ''} ${k === today ? 'today' : ''}" data-act="pick" data-d="${k}" aria-label="${fmt(x, { weekday: 'long', day: 'numeric', month: 'long' })}"><small>${fmt(x, { weekday: 'narrow' }).toUpperCase()}</small><b>${x.getDate()}</b><i class="${S.events.some(e => occurs(e, k)) ? 'dot' : ''}"></i></button>`; }).join('')}</div>`;
+    return `<button class="day ${k === S.date ? 'sel' : ''} ${k === today ? 'today' : ''}" data-act="pick" data-d="${k}" aria-label="${fmt(x, { weekday: 'long', day: 'numeric', month: 'long' })}"><small>${fmt(x, { weekday: 'narrow' }).toUpperCase()}</small><b>${x.getDate()}</b><i class="${(S.events.some(e => occurs(e, k)) || S.plans.some(p => p.date === k)) ? 'dot' : ''}"></i></button>`; }).join('')}</div>`;
+}
+
+function itemRow(it) {
+  const e = it.e, pl = it.k === 'pl', pre = pl ? 'pl' : 'ev', me = S.user.uid;
+  const sub = pl ? `Con ${e.members.filter(u => u !== me).map(u => esc(e.names?.[u] || 'Amigo')).join(', ')}` : (e.repeat ? `Se repite ${e.repeat === 'daily' ? 'cada día' : 'cada semana'}` : '');
+  return `<div class="row ${it.done ? 'done' : ''}"><span class="time">${esc(e.time)}</span><span class="t">${esc(e.title)}${sub ? `<small>${sub}</small>` : ''}</span>
+    <button class="bellb ${e.alert ? 'on' : ''}" data-act="${pre}Bell" data-id="${e.id}" aria-pressed="${!!e.alert}" aria-label="Avisarme a su hora">${BELL}</button>
+    <button class="chk ${it.done ? 'on' : ''}" data-act="${pre}Done" data-id="${e.id}" aria-label="Marcar hecha">${it.done ? '✓' : ''}</button>
+    ${!pl || e.by === me ? `<button class="x" data-act="${pre}Del" data-id="${e.id}" aria-label="Borrar">×</button>` : ''}</div>`;
 }
 
 function agendaView() {
-  const d = parse(S.date), evs = S.events.filter(e => occurs(e, S.date)).sort((a, b) => a.time.localeCompare(b.time));
-  const mine = pisoTasks(S.date).filter(t => t.uid === S.user.uid && (t.day == null || t.day === wday(d))), done = evs.filter(e => isDone(e, S.date)).length;
+  const d = parse(S.date);
+  const items = [...S.events.filter(e => occurs(e, S.date)).map(e => ({ k: 'ev', e, done: isDone(e, S.date) })), ...S.plans.filter(p => p.date === S.date).map(e => ({ k: 'pl', e, done: !!e.done }))].sort((a, b) => a.e.time.localeCompare(b.e.time));
+  const mine = pisoTasks(S.date).filter(t => t.uid === S.user.uid && (t.day == null || t.day === wday(d))), done = items.filter(i => i.done).length;
+  const who = S.friends.length ? `<div class="who"><small>Hacerlo con:</small>${S.friends.map(f => `<label><input type="checkbox" name="with" value="${f.uid}"><span>${esc(f.name)}</span></label>`).join('')}</div>` : '';
   return topbar('Agenda') +
     `<div class="nav"><strong class="sub">${fmt(d, { month: 'long', year: 'numeric' })}</strong><span><button data-act="day" data-n="-7" aria-label="Semana anterior">‹</button><button data-act="day" data-n="7" aria-label="Semana siguiente">›</button></span></div>` + weekStrip() +
-    `<div class="sum"><div><b>${evs.length - done}</b><span>pendientes</span></div><div><b>${done}</b><span>completadas</span></div></div>` +
+    `<div class="sum"><div><b>${items.length - done}</b><span>pendientes</span></div><div><b>${done}</b><span>completadas</span></div></div>` +
     (mine.length ? `<h2>Te toca en el colectivo</h2><div class="list">${mine.map(t => taskRow(t)).join('')}</div>` : '') +
     `<h2 class="sub">${fmt(d, { weekday: 'long', day: 'numeric', month: 'long' })}</h2>` +
-    (evs.length ? `<div class="list">${evs.map(e => `<div class="row ${isDone(e, S.date) ? 'done' : ''}"><span class="time">${esc(e.time)}</span><span class="t">${esc(e.title)}${e.repeat ? `<small>Se repite ${e.repeat === 'daily' ? 'cada día' : 'cada semana'}</small>` : ''}</span>
-      <button class="bellb ${e.alert ? 'on' : ''}" data-act="evBell" data-id="${e.id}" aria-pressed="${!!e.alert}" aria-label="Avisarme a su hora">${BELL}</button>
-      <button class="chk ${isDone(e, S.date) ? 'on' : ''}" data-act="evDone" data-id="${e.id}" aria-label="Marcar hecha">${isDone(e, S.date) ? '✓' : ''}</button>
-      <button class="x" data-act="evDel" data-id="${e.id}" aria-label="Borrar">×</button></div>`).join('')}</div>` : '<div class="empty">Nada apuntado este día.</div>') +
-    `<form class="add ev" id="addEv"><input name="time" type="time" required value="09:00"><input name="title" placeholder="Nueva tarea" required><label class="bell"><input type="checkbox" name="alert"><span>${BELL}<em>Avisarme a su hora</em></span></label><select name="repeat" aria-label="Repetir"><option value="">No se repite</option><option value="daily">Se repite cada día</option><option value="weekly">Se repite cada semana</option></select><button>Añadir</button></form>`;
+    (items.length ? `<div class="list">${items.map(itemRow).join('')}</div>` : '<div class="empty">Nada apuntado este día.</div>') +
+    `<form class="add ev" id="addEv"><input name="time" type="time" required value="09:00"><input name="title" placeholder="Nueva tarea" required>${who}<label class="bell"><input type="checkbox" name="alert"><span>${BELL}<em>Avisarme a su hora</em></span></label><select name="repeat" aria-label="Repetir"><option value="">No se repite</option><option value="daily">Se repite cada día</option><option value="weekly">Se repite cada semana</option></select><button>Añadir</button></form>`;
 }
 
 function taskRow(t) {
@@ -153,11 +161,13 @@ function colectivoView() {
 
 function perfilView() {
   const u = S.user, p = S.piso, name = u.displayName || '';
+  const amigos = `<h2>Amigos</h2><div class="list"><div class="row"><span class="t">Tu código<small>Compártelo para que te añadan</small></span><span class="code sm">${esc(S.friendCode || '…')}</span></div>${S.friends.map(f => `<div class="row">${avatar(f.uid, f.name)}<span class="t">${esc(f.name)}</span><button class="x" data-act="frDel" data-id="${f.id}" aria-label="Quitar amigo">×</button></div>`).join('')}<form class="row" id="addFriend"><input name="code" placeholder="Código de un amigo" maxlength="6" required autocapitalize="characters"><button class="link">Añadir</button></form></div>${S.err ? `<p class="err">${esc(S.err)}</p>` : ''}`;
   return `<header class="top"><h1>Perfil</h1></header>
   <div class="prof">${avatar(u.uid, name, 'big')}<b>${esc(name)}</b><span>${esc(u.email)}</span></div>
   <h2>Cuenta</h2><div class="list"><form class="row" id="rename"><span class="v">Nombre</span><input name="name" value="${esc(name)}" required maxlength="30"><button class="link">Guardar</button></form></div>
   <h2>Avisos</h2><div class="list"><div class="row"><span class="t">Notificaciones</span>${pushOn() ? '<span class="v">Activadas ✓</span>' : '<button class="link" data-act="push">Activar</button>'}</div><form class="row" id="housetime"><span class="t">Aviso del colectivo</span><input type="time" name="housetime" value="${esc(S.housetime || '08:00')}" required><button class="link">Guardar</button></form></div>
   ${S.pushMsg && S.pushMsg !== 'on' ? `<p class="err">${esc(S.pushMsg)}</p>` : ''}
+  ${amigos}
   ${p ? `<h2>Colectivo</h2><div class="list"><div class="row"><span class="t">${esc(p.name)}<small>Código ${esc(p.code)}</small></span></div><button class="row danger" data-act="leave">Salir del colectivo</button></div>` : ''}
   <div class="list" style="margin-top:22px"><button class="row danger" data-act="out">Cerrar sesión</button></div>`;
 }
@@ -168,8 +178,21 @@ function render() {
   const keep = S.lastTab === S.tab ? [...app.querySelectorAll('input')].map(i => [i.name, i.value, i.checked]) : [], focus = document.activeElement?.name;
   S.lastTab = S.tab;
   app.innerHTML = !S.user ? authView() : (S.tab === 'hoy' ? agendaView() : S.tab === 'piso' ? colectivoView() : perfilView()) + tabs();
-  keep.forEach(([n, v, c]) => { const i = n && app.querySelector(`input[name="${n}"]`); if (!i) return; if (i.type === 'checkbox') i.checked = c; else if (v) i.value = v; });
+  const els = [...app.querySelectorAll('input')]; keep.forEach(([n, v, c], i) => { const el = els[i]; if (!el || el.name !== n) return; if (el.type === 'checkbox') el.checked = c; else if (v) el.value = v; });
   if (focus) app.querySelector(`input[name="${focus}"]`)?.focus();
+}
+
+// Código personal para que tus amigos te añadan
+async function makeFriendCode() {
+  try {
+    for (let i = 0; i < 5; i++) {
+      const code = Array.from({ length: 6 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]).join('');
+      if ((await getDoc(doc(db, 'friendCodes', code))).exists()) continue;
+      await setDoc(doc(db, 'friendCodes', code), { uid: S.user.uid, name: S.user.displayName || 'Amigo' });
+      await setDoc(doc(db, 'users', S.user.uid), { friendCode: code }, { merge: true });
+      return;
+    }
+  } catch (x) { console.error(x); } finally { S.codeBusy = false; }
 }
 
 // ---------- datos en tiempo real ----------
@@ -180,12 +203,14 @@ function watchPiso(pid) {
   pisoSubs.push(onSnapshot(collection(db, 'pisos', pid, 'done'), s => { S.done = {}; s.docs.forEach(d => S.done[d.id] = 1); render(); }));
 }
 function watchUser(u) {
-  subs.push(onSnapshot(doc(db, 'users', u.uid), s => { S.housetime = s.data()?.housetime; const pid = s.data()?.pisoId || null; if (pid !== S.pid) { S.pid = pid; watchPiso(pid); } }));
+  subs.push(onSnapshot(query(collection(db, 'friendships'), where('members', 'array-contains', u.uid)), s => { S.friends = s.docs.map(d => { const x = d.data(), uid = x.members.find(m => m !== u.uid); return { id: d.id, uid, name: x.names?.[uid] || 'Amigo' }; }); render(); }));
+  subs.push(onSnapshot(query(collection(db, 'plans'), where('members', 'array-contains', u.uid)), s => { S.plans = s.docs.map(d => ({ id: d.id, ...d.data() })); render(); }));
+  subs.push(onSnapshot(doc(db, 'users', u.uid), s => { S.housetime = s.data()?.housetime; S.friendCode = s.data()?.friendCode; if (!S.friendCode && !S.codeBusy) { S.codeBusy = true; makeFriendCode(); } const pid = s.data()?.pisoId || null; if (pid !== S.pid) { S.pid = pid; watchPiso(pid); } }));
   subs.push(onSnapshot(collection(db, 'users', u.uid, 'events'), s => { S.events = s.docs.map(d => ({ id: d.id, ...d.data() })); render(); }));
 }
 onAuthStateChanged(auth, u => {
   subs.forEach(f => f()); pisoSubs.forEach(f => f()); subs = []; pisoSubs = [];
-  Object.assign(S, { user: u, pid: null, piso: null, done: {}, events: [], err: '' });
+  Object.assign(S, { user: u, pid: null, piso: null, done: {}, events: [], friends: [], plans: [], err: '' });
   if (u) watchUser(u);
   if (u && 'Notification' in window && Notification.permission === 'granted') enablePush();
   render();
@@ -200,8 +225,12 @@ app.addEventListener('click', async e => {
   const { act, id, n, t, wk, d } = b.dataset;
   try {
     if (act === 'toggleReg') { S.reg = !S.reg; S.err = ''; }
-    else if (act === 'tab') S.tab = t;
+    else if (act === 'tab') { S.tab = t; S.err = ''; }
     else if (act === 'pick') S.date = d;
+    else if (act === 'plDone') { const pl = S.plans.find(x => x.id === id); return updateDoc(doc(db, 'plans', id), { done: !pl.done }); }
+    else if (act === 'plBell') { const pl = S.plans.find(x => x.id === id); return updateDoc(doc(db, 'plans', id), { alert: !pl.alert, notifiedBy: [] }); }
+    else if (act === 'plDel') return deleteDoc(doc(db, 'plans', id));
+    else if (act === 'frDel') { if (!confirm('¿Quitar a este amigo?')) return; return deleteDoc(doc(db, 'friendships', id)); }
     else if (act === 'grRename') { const g = S.piso.groups.find(x => x.id === id), nm = prompt('Nombre del grupo', g.name); if (!nm || !nm.trim()) return; await updateDoc(doc(db, 'pisos', S.pid), { groups: S.piso.groups.map(x => x.id === id ? { ...x, name: nm.trim().slice(0, 30) } : x) }); }
     else if (act === 'grDel') { if (!confirm('¿Borrar el grupo y todas sus tareas?')) return; await updateDoc(doc(db, 'pisos', S.pid), { groups: S.piso.groups.filter(x => x.id !== id), tasks: S.piso.tasks.filter(x => x.gid !== id) }); }
     else if (act === 'leave') { if (!confirm('¿Salir del colectivo?')) return; await updateDoc(doc(db, 'pisos', S.pid), { members: arrayRemove(me()), [`names.${me()}`]: deleteField(), ...((S.piso.owner || S.piso.members[0]) === me() && S.piso.members.length > 1 ? { owner: S.piso.members.find(x => x !== me()) } : {}) }); await updateDoc(doc(db, 'users', me()), { pisoId: deleteField() }); }
@@ -226,7 +255,12 @@ app.addEventListener('submit', async e => {
       if (S.reg) { const c = await createUserWithEmailAndPassword(auth, f.email, f.pass); await updateProfile(c.user, { displayName: f.name.trim() }); await setDoc(doc(db, 'users', c.user.uid), { name: f.name.trim() }); }
       else await signInWithEmailAndPassword(auth, f.email, f.pass);
     } else if (id === 'addEv') {
-      await addDoc(collection(db, 'users', me(), 'events'), { date: S.date, time: f.time, title: f.title.trim(), done: false, alert: f.alert === 'on', notified: false, repeat: f.repeat || null }); e.target.title.value = '';
+      const withs = new FormData(e.target).getAll('with');
+      if (withs.length) {
+        const names = { [me()]: myName() }; S.friends.forEach(fr => { if (withs.includes(fr.uid)) names[fr.uid] = fr.name; });
+        await addDoc(collection(db, 'plans'), { title: f.title.trim(), date: S.date, time: f.time, members: [me(), ...withs], names, by: me(), done: false, alert: f.alert === 'on', notifiedBy: [] });
+      } else await addDoc(collection(db, 'users', me(), 'events'), { date: S.date, time: f.time, title: f.title.trim(), done: false, alert: f.alert === 'on', notified: false, repeat: f.repeat || null });
+      e.target.title.value = ''; e.target.querySelectorAll('input[name="with"]').forEach(c => { c.checked = false; });
     } else if (id === 'mkPiso') {
       const ref = await addDoc(collection(db, 'pisos'), { name: f.name.trim(), code: Math.random().toString(36).slice(2, 8).toUpperCase(), owner: me(), members: [me()], names: { [me()]: myName() }, tasks: [] });
       await setDoc(doc(db, 'users', me()), { pisoId: ref.id }, { merge: true });
@@ -237,10 +271,18 @@ app.addEventListener('submit', async e => {
       await setDoc(doc(db, 'users', me()), { pisoId: q.docs[0].id }, { merge: true });
     } else if (id === 'addGroup') {
       await updateDoc(doc(db, 'pisos', S.pid), { groups: arrayUnion({ id: 'g' + crypto.randomUUID().slice(0, 6), name: f.name.trim() }) }); e.target.name.value = '';
+    } else if (id === 'addFriend') {
+      const code = f.code.trim().toUpperCase(), snap = await getDoc(doc(db, 'friendCodes', code));
+      if (!snap.exists()) { S.err = 'Ese código no existe.'; return render(); }
+      const fu = snap.data().uid, fname = snap.data().name || 'Amigo';
+      if (fu === me()) { S.err = 'Ese es tu propio código.'; return render(); }
+      if (S.friends.some(x => x.uid === fu)) { S.err = 'Ya sois amigos.'; return render(); }
+      await setDoc(doc(db, 'friendships', [me(), fu].sort().join('_')), { members: [me(), fu], names: { [me()]: myName(), [fu]: fname } }); e.target.code.value = '';
     } else if (id === 'housetime') {
       await setDoc(doc(db, 'users', me()), { housetime: f.housetime }, { merge: true });
     } else if (id === 'rename') {
       const nm = f.name.trim(); await updateProfile(auth.currentUser, { displayName: nm }); await setDoc(doc(db, 'users', me()), { name: nm }, { merge: true });
+      if (S.friendCode) await updateDoc(doc(db, 'friendCodes', S.friendCode), { name: nm });
       if (S.pid) await updateDoc(doc(db, 'pisos', S.pid), { [`names.${me()}`]: nm });
     } else if (id === 'addTask') {
       await updateDoc(doc(db, 'pisos', S.pid), { tasks: arrayUnion({ id: crypto.randomUUID().slice(0, 8), name: f.name.trim(), day: f.day === '' ? null : +f.day, gid: f.gid }) }); e.target.name.value = '';

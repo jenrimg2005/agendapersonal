@@ -52,6 +52,12 @@ async function push(u, tokens, title, body) {
   return ok; // cuántos envíos salieron bien
 }
 
+const planCache = new Map();
+async function plansFor(date) {
+  if (!planCache.has(date)) planCache.set(date, (await db.collection('plans').where('date', '==', date).get()).docs);
+  return planCache.get(date);
+}
+
 const pisos = new Map();
 async function getPiso(id) {
   if (!pisos.has(id)) { const s = await db.collection('pisos').doc(id).get(); pisos.set(id, s.exists ? { id: s.id, ref: s.ref, ...s.data() } : null); }
@@ -81,6 +87,18 @@ async function getPiso(id) {
       if (why) continue;
       if (await push(u, tokens, `⏰ ${ev.time}`, `Es tu hora: ${ev.title}`)) // solo se marca como avisada si el envío salió bien
         await e.ref.update(ev.repeat ? { notifiedDates: FV.arrayUnion(date) } : { notified: true });
+    }
+
+    // 1b) Tareas compartidas con amigos
+    for (const pd of await plansFor(date)) {
+      const pl = pd.data();
+      if (!(pl.members || []).includes(u.id)) continue;
+      const t = toMin(pl.time);
+      const why = !pl.alert ? 'sin campanita' : pl.done ? 'ya hecha' : (pl.notifiedBy || []).includes(u.id) ? 'ya avisada' : t > min ? 'aún no es la hora' : min - t > 180 ? 'pasaron más de 3 h' : '';
+      console.log(`  Plan compartido "${pl.title}" (${pl.time}): ${why || 'AVISAR'}`);
+      if (why) continue;
+      const otros = pl.members.filter(m => m !== u.id).map(m => pl.names?.[m]).filter(Boolean).join(', ');
+      if (await push(u, tokens, `⏰ ${pl.time}`, `Es tu hora: ${pl.title}${otros ? ' (con ' + otros + ')' : ''}`)) await pd.ref.update({ notifiedBy: FV.arrayUnion(u.id) });
     }
 
     // 2) Tareas del colectivo: "hoy te toca" a la hora elegida (por defecto 08:00)

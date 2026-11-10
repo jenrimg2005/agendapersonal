@@ -101,3 +101,10 @@ select.pick{width:auto;max-width:132px;padding:6px 10px;font-size:14px;border-ra
 .bell{grid-column:1/-1;display:flex;align-items:center;justify-content:flex-start;padding:2px 4px}
 .bell span{display:flex;align-items:center;gap:8px}
 .bell em{font-style:normal;font-size:15px}
+.who{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.who small{color:var(--mute);width:100%}
+.who label{cursor:pointer}
+.who input{display:none}
+.who span{display:inline-block;padding:6px 14px;border-radius:16px;background:var(--card);box-shadow:var(--shadow);font-size:15px}
+.who input:checked+span{background:var(--blue);color:#fff}
+.code.sm{font-size:18px;letter-spacing:.12em}
